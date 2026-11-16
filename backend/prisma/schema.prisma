@@ -1,0 +1,966 @@
+// RateBoi — initial data model (Prisma 7, PostgreSQL)
+// Money: integer poisha (*Minor). Weight: grams. Time: UTC in DB, Asia/Dhaka in UI.
+// Phones: E.164 (+8801XXXXXXXXX) + HMAC hash (phoneHash) for cross-merchant lookups.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+enum UserRole {
+  PLATFORM_ADMIN
+  RATE_EDITOR
+  MERCHANT
+}
+
+enum MemberRole {
+  OWNER
+  MANAGER
+  PACKER
+}
+
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum CourierCode {
+  PATHAO
+  STEADFAST
+  REDX
+  PAPERFLY
+  ECOURIER
+  CARRYBEE
+  SUNDARBAN
+  SA_PARIBAHAN
+  OTHER
+}
+
+enum CourierIntegration {
+  API
+  RATE_CARD_ONLY
+}
+
+enum LocationType {
+  DIVISION
+  DISTRICT
+  CITY_CORPORATION
+  THANA
+  AREA
+}
+
+enum ZoneClass {
+  DHAKA_METRO
+  DHAKA_SUBURB
+  DIVISIONAL_CITY
+  DISTRICT_TOWN
+  REMOTE
+}
+
+enum RouteClass {
+  SAME_CITY
+  DHAKA_TO_SUBURB
+  SUBURB_TO_SUBURB
+  DHAKA_TO_OUTSIDE
+  OUTSIDE_TO_DHAKA
+  OUTSIDE_SAME_DISTRICT
+  OUTSIDE_TO_OUTSIDE
+}
+
+enum ServiceLevel {
+  REGULAR
+  EXPRESS
+  ON_DEMAND
+  POINT_DELIVERY
+}
+
+enum CodBase {
+  PRODUCT_PRICE
+  CASH_COLLECTED
+  CASH_COLLECTED_MINUS_DELIVERY
+}
+
+enum RateCardStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum MappingSource {
+  AUTO_EXACT
+  AUTO_FUZZY
+  AI
+  HUMAN
+}
+
+enum CredentialStatus {
+  PENDING
+  VERIFIED
+  INVALID
+  REVOKED
+}
+
+enum OrderSource {
+  MANUAL
+  PASTE_AI
+  SHARE_INTENT
+  CSV
+  MESSENGER
+  WHATSAPP
+  API
+  WOOCOMMERCE
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  READY_TO_SHIP
+  SHIPPED
+  DELIVERED
+  PARTIAL_DELIVERED
+  RETURNED
+  CANCELLED
+}
+
+enum BookingState {
+  QUEUED
+  BOOKING
+  BOOKED
+  UNCERTAIN
+  FAILED
+  CANCELLED
+}
+
+enum ShipmentStatus {
+  CREATED
+  PICKUP_PENDING
+  PICKED_UP
+  IN_TRANSIT
+  AT_HUB
+  OUT_FOR_DELIVERY
+  ON_HOLD
+  DELIVERED
+  PARTIAL_DELIVERED
+  RETURNING
+  RETURNED
+  CANCELLED
+  LOST
+  UNKNOWN
+}
+
+enum DeliveryKind {
+  REGULAR
+  REVERSE
+  EXCHANGE_DELIVERY
+  EXCHANGE_RETURN
+  PARTIAL_DELIVERY
+  PARTIAL_RETURN
+}
+
+enum EventSource {
+  WEBHOOK
+  POLL
+  MANUAL
+  IMPORT
+}
+
+enum RiskLevel {
+  SAFE
+  WATCH
+  RISKY
+  BLOCKLISTED
+  UNKNOWN
+}
+
+enum RiskSource {
+  COURIER_API
+  RATEBOI_NETWORK
+  COMMUNITY_REPORT
+  MERCHANT_HISTORY
+}
+
+enum ReportStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PayoutMatch {
+  MATCHED
+  AMOUNT_MISMATCH
+  UNMATCHED_LINE
+  MISSING_PAYOUT
+}
+
+enum PaymentProvider {
+  BKASH
+  SSLCOMMERZ
+  NAGAD
+  MANUAL
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum Channel {
+  SMS
+  WHATSAPP
+  MESSENGER
+  PUSH
+  EMAIL
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  SKIPPED
+}
+
+enum SeoPageType {
+  ROUTE
+  COURIER
+  COURIER_ROUTE
+  COURIER_VS
+  DISTRICT
+  TOOL
+  GUIDE
+}
+
+enum SeoPageStatus {
+  DRAFT
+  NOINDEX
+  INDEXABLE
+  PRUNED
+}
+
+enum Locale {
+  bn
+  en
+}
+
+// ───────────────────────── Identity ─────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  phone         String    @unique // E.164
+  email         String?   @unique
+  fullName      String
+  passwordHash  String?
+  role          UserRole  @default(MERCHANT)
+  locale        Locale    @default(bn)
+  phoneVerified DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships   MerchantMember[]
+  sessions      Session[]
+  auditLogs     AuditLog[]
+  pushTokens    PushToken[]
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  purpose   String // LOGIN | VERIFY_PHONE
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([phone, purpose, createdAt])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String // android | ios | web
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────── Merchant (seller) ─────────────────────────
+
+model Merchant {
+  id               String    @id @default(cuid())
+  slug             String    @unique
+  name             String
+  facebookPageUrl  String?
+  phone            String?
+  defaultPickupLocationId String?
+  plan             Plan      @default(FREE)
+  referralCode     String    @unique
+  referredById     String?
+  settings         Json      @default("{}") // courier priorities, auto-book rules, notification prefs
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  members          MerchantMember[]
+  courierAccounts  CourierAccount[]
+  customers        Customer[]
+  orders           Order[]
+  shipments        Shipment[]
+  rateOverrides    MerchantRateOverride[]
+  payouts          CodPayout[]
+  subscriptions    Subscription[]
+  payments         Payment[]
+  channels         ChannelConnection[]
+  apiKeys          ApiKey[]
+  fraudReports     FraudReport[]
+  crowdRates       CrowdRateReport[]
+  quotes           QuoteLog[]
+  referredBy       Merchant?  @relation("Referral", fields: [referredById], references: [id])
+  referrals        Merchant[] @relation("Referral")
+}
+
+model MerchantMember {
+  id         String     @id @default(cuid())
+  merchantId String
+  userId     String
+  role       MemberRole @default(OWNER)
+  createdAt  DateTime   @default(now())
+  merchant   Merchant   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, userId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  merchantId String
+  name       String
+  prefix     String    @unique
+  keyHash    String
+  scopes     String[]
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  merchantId       String
+  plan             Plan
+  status           SubscriptionStatus
+  currentPeriodEnd DateTime
+  cancelAtPeriodEnd Boolean           @default(false)
+  createdAt        DateTime           @default(now())
+  merchant         Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, status])
+}
+
+model Payment {
+  id          String          @id @default(cuid())
+  merchantId  String
+  provider    PaymentProvider
+  status      PaymentStatus   @default(INITIATED)
+  purpose     String // SUBSCRIPTION | CREDITS
+  amountMinor Int
+  currency    String          @default("BDT")
+  tranId      String          @unique // our idempotency key / merchantInvoiceNumber
+  providerRef String?         // bKash paymentID / trxID, SSLCommerz val_id
+  raw         Json?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  merchant    Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────── Geography (gazetteer) ─────────────────────────
+
+model Location {
+  id        String       @id @default(cuid())
+  type      LocationType
+  nameEn    String
+  nameBn    String
+  slug      String       @unique // e.g. "chattogram", "dhaka-mirpur"
+  aliases   String[]     // Banglish/alt spellings: "ctg", "chittagong", "চিটাগাং"
+  postCodes String[]
+  zoneClass ZoneClass
+  parentId  String?
+  lat       Float?
+  lng       Float?
+  parent    Location?    @relation("LocationTree", fields: [parentId], references: [id])
+  children  Location[]   @relation("LocationTree")
+
+  courierMaps   LocationCourierMap[]
+  customers     Customer[]
+  seoFrom       SeoPage[] @relation("SeoFrom")
+  seoTo         SeoPage[] @relation("SeoTo")
+
+  @@index([type, parentId])
+}
+
+model Courier {
+  id          String             @id @default(cuid())
+  code        CourierCode        @unique
+  name        String
+  nameBn      String
+  website     String?
+  integration CourierIntegration @default(RATE_CARD_ONLY)
+  logoUrl     String?
+  active      Boolean            @default(true)
+
+  areas       CourierArea[]
+  rateCards   RateCard[]
+  accounts    CourierAccount[]
+  shipments   Shipment[]
+  crowdRates  CrowdRateReport[]
+  stats       CourierRouteStat[]
+}
+
+model CourierArea {
+  id           String   @id @default(cuid())
+  courierId    String
+  externalId   String   // courier's area/zone/city id (string to be safe)
+  kind         String   // city | zone | area | thana
+  name         String
+  parentExternalId String?
+  postCode     String?
+  districtName String?
+  homeDelivery Boolean?
+  pickup       Boolean?
+  raw          Json?
+  lastSeenAt   DateTime @default(now())
+  disappearedAt DateTime?
+  courier      Courier  @relation(fields: [courierId], references: [id], onDelete: Cascade)
+  maps         LocationCourierMap[]
+
+  @@unique([courierId, kind, externalId])
+  @@index([courierId, districtName])
+}
+
+model LocationCourierMap {
+  id            String        @id @default(cuid())
+  locationId    String
+  courierAreaId String
+  source        MappingSource
+  confidence    Float         @default(1)
+  verifiedById  String?
+  createdAt     DateTime      @default(now())
+  location      Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  courierArea   CourierArea   @relation(fields: [courierAreaId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, courierAreaId])
+}
+
+// ───────────────────────── Rates ─────────────────────────
+
+model RateCard {
+  id              String         @id @default(cuid())
+  courierId       String
+  version         Int
+  status          RateCardStatus @default(DRAFT)
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  vatIncluded     Boolean
+  vatBps          Int            @default(1500)
+  codBps          Int            // 100 = 1%
+  codBpsDhakaMetro Int?
+  codBase         CodBase        @default(CASH_COLLECTED)
+  codMinMinor     Int            @default(0)
+  returnPolicy    Json           // { outsideDhakaBps: 5000, dhakaMetroBps: 0, partialExchangeBps: 5000 }
+  sourceUrl       String
+  sourceCheckedAt DateTime
+  notes           String?
+  publishedById   String?
+  createdAt       DateTime       @default(now())
+  courier         Courier        @relation(fields: [courierId], references: [id], onDelete: Cascade)
+  slabs           RateSlab[]
+
+  @@unique([courierId, version])
+  @@index([courierId, status, effectiveFrom])
+}
+
+model RateSlab {
+  id               String       @id @default(cuid())
+  rateCardId       String
+  routeClass       RouteClass
+  serviceLevel     ServiceLevel @default(REGULAR)
+  maxWeightGrams   Int          // upper bound of this slab (inclusive)
+  priceMinor       Int
+  extraPerKgMinor  Int?         // applied above the last slab, per started kg
+  etaHoursMin      Int?
+  etaHoursMax      Int?
+  rateCard         RateCard     @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
+
+  @@unique([rateCardId, routeClass, serviceLevel, maxWeightGrams])
+}
+
+model MerchantRateOverride {
+  id          String   @id @default(cuid())
+  merchantId  String
+  courierCode CourierCode
+  slabs       Json     // same shape as RateSlab[] (negotiated)
+  codBps      Int?
+  returnPolicy Json?
+  evidenceUrl String?  // uploaded screenshot of merchant panel
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, courierCode])
+}
+
+/// Crowd-sourced actual charges (also auto-created from real bookings). Feeds pSEO "real charges" blocks.
+model CrowdRateReport {
+  id             String      @id @default(cuid())
+  courierId      String
+  merchantId     String?
+  fromLocationId String
+  toLocationId   String
+  weightGrams    Int
+  codMinor       Int
+  chargedMinor   Int
+  codChargeMinor Int?
+  fromShipmentId String?     @unique
+  verified       Boolean     @default(false)
+  reportedAt     DateTime    @default(now())
+  courier        Courier     @relation(fields: [courierId], references: [id], onDelete: Cascade)
+  merchant       Merchant?   @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+
+  @@index([courierId, fromLocationId, toLocationId])
+}
+
+/// Aggregated per-courier performance by district (nightly job). Powers recommender + pSEO.
+model CourierRouteStat {
+  id              String   @id @default(cuid())
+  courierId       String
+  toDistrictId    String
+  periodStart     DateTime
+  shipments       Int
+  delivered       Int
+  returned        Int
+  medianHours     Int?
+  p90Hours        Int?
+  courier         Courier  @relation(fields: [courierId], references: [id], onDelete: Cascade)
+
+  @@unique([courierId, toDistrictId, periodStart])
+}
+
+/// Every calculator run (anonymous or logged in). Demand signal for SEO + product.
+model QuoteLog {
+  id             String   @id @default(cuid())
+  merchantId     String?
+  anonId         String?
+  fromLocationId String
+  toLocationId   String
+  weightGrams    Int
+  codMinor       Int
+  serviceLevel   ServiceLevel @default(REGULAR)
+  results        Json     // [{courier, deliveryMinor, codChargeMinor, totalMinor, expectedCostMinor, etaHours}]
+  chosenCourier  CourierCode?
+  channel        String   // web | app | api | widget
+  createdAt      DateTime @default(now())
+  merchant       Merchant? @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+
+  @@index([fromLocationId, toLocationId, createdAt])
+}
+
+// ───────────────────────── Courier accounts ─────────────────────────
+
+model CourierAccount {
+  id              String           @id @default(cuid())
+  merchantId      String
+  courierId       String
+  label           String
+  credentialsEnc  Bytes            // AES-256-GCM envelope (KMS/data key); never returned by API
+  credentialsKeyId String
+  externalStoreId String?
+  status          CredentialStatus @default(PENDING)
+  isDefault       Boolean          @default(false)
+  webhookSecret   String?          // per-account random token for inbound webhooks
+  lastVerifiedAt  DateTime?
+  lastError       String?
+  createdAt       DateTime         @default(now())
+  merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  courier         Courier          @relation(fields: [courierId], references: [id])
+  pickupStores    PickupStore[]
+  shipments       Shipment[]
+  payouts         CodPayout[]
+
+  @@index([merchantId, courierId])
+}
+
+model PickupStore {
+  id               String         @id @default(cuid())
+  courierAccountId String
+  externalId       String
+  name             String
+  address          String
+  phone            String?
+  locationId       String?
+  isDefault        Boolean        @default(false)
+  courierAccount   CourierAccount @relation(fields: [courierAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([courierAccountId, externalId])
+}
+
+// ───────────────────────── Customers & risk ─────────────────────────
+
+model Customer {
+  id          String    @id @default(cuid())
+  merchantId  String
+  name        String
+  phone       String    // E.164
+  phoneHash   String    // HMAC(pepper, phone)
+  altPhone    String?
+  address     String?
+  locationId  String?
+  tags        String[]
+  notes       String?
+  totalOrders Int       @default(0)
+  delivered   Int       @default(0)
+  returned    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  merchant    Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  location    Location? @relation(fields: [locationId], references: [id])
+  orders      Order[]
+
+  @@unique([merchantId, phone])
+  @@index([phoneHash])
+}
+
+model RiskSnapshot {
+  id          String     @id @default(cuid())
+  phoneHash   String
+  source      RiskSource
+  courierCode CourierCode?
+  total       Int
+  delivered   Int
+  returned    Int
+  cancelled   Int        @default(0)
+  successBps  Int        // 0..10000
+  level       RiskLevel
+  raw         Json?
+  fetchedAt   DateTime   @default(now())
+  expiresAt   DateTime
+
+  @@index([phoneHash, source, fetchedAt])
+}
+
+model FraudReport {
+  id          String       @id @default(cuid())
+  merchantId  String
+  phoneHash   String
+  reason      String // FAKE_ORDER | REFUSED_NO_REASON | ABUSIVE | SCAM_PAYMENT
+  description String?
+  evidenceUrls String[]
+  orderId     String?
+  status      ReportStatus @default(PENDING)
+  moderatedById String?
+  createdAt   DateTime     @default(now())
+  merchant    Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, phoneHash, orderId])
+  @@index([phoneHash, status])
+}
+
+// ───────────────────────── Orders & shipments ─────────────────────────
+
+model Order {
+  id                  String      @id @default(cuid())
+  merchantId          String
+  code                String      // human code, e.g. RB-24K9Q (unique per merchant)
+  customerId          String
+  source              OrderSource @default(MANUAL)
+  status              OrderStatus @default(DRAFT)
+  itemsTotalMinor     Int
+  shippingFeeMinor    Int         @default(0) // charged to customer
+  discountMinor       Int         @default(0)
+  advancePaidMinor    Int         @default(0)
+  codAmountMinor      Int         // server-computed: items + shipping - discount - advance
+  weightGrams         Int         @default(500)
+  deliveryAddress     String
+  deliveryLocationId  String?
+  note                String?
+  rawInput            String?     // pasted chat text (PII; retention policy applies)
+  aiConfidence        Float?
+  riskLevel           RiskLevel   @default(UNKNOWN)
+  idempotencyKey      String?
+  createdById         String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  merchant            Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer            Customer    @relation(fields: [customerId], references: [id])
+  items               OrderItem[]
+  shipments           Shipment[]
+
+  @@unique([merchantId, code])
+  @@unique([merchantId, idempotencyKey])
+  @@index([merchantId, status, createdAt])
+}
+
+model OrderItem {
+  id             String @id @default(cuid())
+  orderId        String
+  name           String
+  variant        String?
+  qty            Int    @default(1)
+  unitPriceMinor Int
+  order          Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Shipment {
+  id                    String         @id @default(cuid())
+  merchantId            String
+  orderId               String
+  courierId             String
+  courierAccountId      String?
+  kind                  DeliveryKind   @default(REGULAR)
+  serviceLevel          ServiceLevel   @default(REGULAR)
+  bookingState          BookingState   @default(QUEUED)
+  status                ShipmentStatus @default(CREATED)
+  invoice               String         // idempotency key sent to courier (RB-{orderCode}-{attempt})
+  attempt               Int            @default(1)
+  externalId            String?        // consignment_id / tracking_id
+  trackingCode          String?
+  trackingUrl           String?
+  publicToken           String         @unique // for public tracking page /t/{token}
+  codAmountMinor        Int
+  weightGrams           Int
+  quotedDeliveryMinor   Int?
+  quotedCodChargeMinor  Int?
+  actualDeliveryMinor   Int?
+  actualCodChargeMinor  Int?
+  returnChargeMinor     Int?
+  codCollectedMinor     Int?
+  lastEventAt           DateTime?
+  lastPolledAt          DateTime?
+  bookedAt              DateTime?
+  deliveredAt           DateTime?
+  error                 String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  merchant              Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  order                 Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courier               Courier        @relation(fields: [courierId], references: [id])
+  courierAccount        CourierAccount? @relation(fields: [courierAccountId], references: [id], onDelete: SetNull)
+  events                ShipmentEvent[]
+  payoutLines           CodPayoutLine[]
+
+  @@unique([courierId, invoice])
+  @@unique([courierId, externalId])
+  @@index([merchantId, status, lastEventAt])
+  @@index([bookingState, updatedAt])
+}
+
+model ShipmentEvent {
+  id          String         @id @default(cuid())
+  shipmentId  String
+  rawStatus   String
+  status      ShipmentStatus
+  messageEn   String?
+  messageBn   String?
+  occurredAt  DateTime
+  source      EventSource
+  applied     Boolean        @default(true) // false if out-of-order / regression
+  dedupeKey   String         @unique // courier + externalId + rawStatus + occurredAt
+  raw         Json?
+  createdAt   DateTime       @default(now())
+  shipment    Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, occurredAt])
+}
+
+model WebhookInbox {
+  id             String    @id @default(cuid())
+  provider       String    // pathao | redx | steadfast | bkash | sslcommerz | meta
+  accountRef     String?   // courierAccountId resolved from token
+  headers        Json
+  body           Json
+  signatureValid Boolean?
+  dedupeKey      String?   @unique
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
+  error          String?
+
+  @@index([provider, processedAt])
+}
+
+// ───────────────────────── COD reconciliation ─────────────────────────
+
+model CodPayout {
+  id               String         @id @default(cuid())
+  merchantId       String
+  courierAccountId String
+  externalId       String
+  paidAt           DateTime
+  amountMinor      Int
+  raw              Json?
+  importedVia      String         // API | CSV
+  createdAt        DateTime       @default(now())
+  merchant         Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  courierAccount   CourierAccount @relation(fields: [courierAccountId], references: [id], onDelete: Cascade)
+  lines            CodPayoutLine[]
+
+  @@unique([courierAccountId, externalId])
+}
+
+model CodPayoutLine {
+  id              String      @id @default(cuid())
+  payoutId        String
+  shipmentId      String?
+  externalRef     String      // tracking / consignment from payout sheet
+  collectedMinor  Int
+  deliveryMinor   Int
+  codChargeMinor  Int
+  otherMinor      Int         @default(0)
+  netMinor        Int
+  expectedNetMinor Int?
+  match           PayoutMatch
+  payout          CodPayout   @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  shipment        Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+
+  @@index([shipmentId])
+}
+
+// ───────────────────────── Channels, notifications, AI ─────────────────────────
+
+model ChannelConnection {
+  id          String   @id @default(cuid())
+  merchantId  String
+  channel     Channel
+  externalId  String   // FB page id / WA phone number id
+  tokenEnc    Bytes?
+  status      CredentialStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  inbound     InboundMessage[]
+
+  @@unique([channel, externalId])
+}
+
+model InboundMessage {
+  id            String   @id @default(cuid())
+  connectionId  String
+  externalId    String   @unique
+  fromRef       String   // PSID / wa_id
+  text          String?
+  receivedAt    DateTime
+  parsedOrderId String?
+  connection    ChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  merchantId  String?
+  shipmentId  String?
+  channel     Channel
+  to          String
+  templateKey String
+  payload     Json
+  status      NotificationStatus @default(QUEUED)
+  costMinor   Int?
+  providerRef String?
+  error       String?
+  createdAt   DateTime           @default(now())
+  sentAt      DateTime?
+
+  @@unique([shipmentId, templateKey, channel])
+  @@index([status, createdAt])
+}
+
+model AiParseLog {
+  id          String   @id @default(cuid())
+  merchantId  String?
+  kind        String   // ORDER_PARSE | ADDRESS_RESOLVE | REPLY_DRAFT
+  inputRedacted String
+  output      Json
+  model       String
+  latencyMs   Int
+  tokensIn    Int?
+  tokensOut   Int?
+  accepted    Boolean?
+  fieldEdits  Json?    // which fields the user corrected (eval signal)
+  createdAt   DateTime @default(now())
+
+  @@index([kind, createdAt])
+}
+
+// ───────────────────────── SEO ─────────────────────────
+
+model SeoPage {
+  id             String        @id @default(cuid())
+  type           SeoPageType
+  slug           String        // path without locale prefix, e.g. "delivery-charge/dhaka-to-chattogram"
+  locale         Locale
+  courierCode    CourierCode?
+  vsCourierCode  CourierCode?
+  fromLocationId String?
+  toLocationId   String?
+  title          String
+  h1             String
+  metaDescription String
+  dataSnapshot   Json          // the computed numbers rendered on the page
+  qualityScore   Int           @default(0) // 0..100, gate for indexing
+  status         SeoPageStatus @default(DRAFT)
+  wave           Int           @default(1)
+  lastBuiltAt    DateTime?
+  impressions28d Int           @default(0)
+  clicks28d      Int           @default(0)
+  avgPosition    Float?
+  updatedAt      DateTime      @updatedAt
+  fromLocation   Location?     @relation("SeoFrom", fields: [fromLocationId], references: [id])
+  toLocation     Location?     @relation("SeoTo", fields: [toLocationId], references: [id])
+
+  @@unique([locale, slug])
+  @@index([type, status])
+}
+
+// ───────────────────────── Audit ─────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  merchantId String?
+  action     String
+  entity     String
+  entityId   String?
+  diff       Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, createdAt])
+}

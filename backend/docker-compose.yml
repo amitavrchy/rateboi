@@ -1,0 +1,21 @@
+name: rateboi
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: rateboi
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: rateboi
+    ports: ["${POSTGRES_PORT:-5560}:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rateboi"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["${REDIS_PORT:-6390}:6379"]
+    volumes: ["redis_data:/data"]
+volumes:
+  postgres_data:
+  redis_data:

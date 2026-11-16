@@ -1,0 +1,36 @@
+# Dependencies and build output
+node_modules/
+dist/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma generated client
+backend/src/generated/
+
+# Local environment files (examples are committed)
+!.env.example
+
+# Expo / React Native
+apps/mobile/.expo/
+apps/mobile/expo-env.d.ts
+apps/mobile/ios/
+apps/mobile/android/
+apps/mobile/web-build/
+apps/mobile/dist/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+
+# Tests / tooling artefacts
+frontend/test-results/
+frontend/playwright-report/
+*.log
+.DS_Store
+uploads/
+config.bat
